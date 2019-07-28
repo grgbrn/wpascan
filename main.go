@@ -2,79 +2,76 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	wifi "github.com/mark2b/wpa-connect"
 )
 
-func scanExample() {
-	// default "wlan0" only works on a raspi
-	// kubuntu nuc uses "wlp0s20f3"
+func scanExample(interfaceName string) error {
 
 	// kind of a weird way to pass params to the scanManager
 	scanner := wifi.ScanManager
-	scanner.NetInterface = "wlp0s20f3"
+	scanner.NetInterface = interfaceName
 
-	if bssList, err := scanner.Scan(); err == nil {
-		for _, bss := range bssList {
-			//fmt.Println(bss.SSID, bss.Signal, bss.KeyMgmt)
-			fmt.Printf("%+v\n", bss)
-		}
-	} else {
-		fmt.Println("error scanning wifi")
-		fmt.Println(err)
+	bssList, err := scanner.Scan()
+	if err != nil {
+		return err
 	}
+	for _, bss := range bssList {
+		//fmt.Println(bss.SSID, bss.Signal, bss.KeyMgmt)
+		fmt.Printf("%+v\n", bss)
+	}
+	return nil
 }
 
 // XXX haven't really tested this yet
-func connectExample() {
+func connectExample(interfaceName, ssid, pass string) error {
 
 	conMan := wifi.ConnectManager
-	conMan.NetInterface = "wlp0s20f3"
-
-	ssid := "NETGEAR28-5G"
-	pass := "XXXX"
+	conMan.NetInterface = interfaceName
 
 	if conn, err := conMan.Connect(ssid, pass, time.Second*60); err == nil {
 		fmt.Println("Connected", conn.NetInterface, conn.SSID, conn.IP4.String(), conn.IP6.String())
+		return nil
 	} else {
 		fmt.Println(err)
+		return err
 	}
 }
 
-func disconnectExample() {
-
-	ssid := "NETGEAR28-5G"
+func disconnectExample(interfaceName, ssid string) error {
 
 	conMan := wifi.ConnectManager
-	conMan.NetInterface = "wlp0s20f3"
+	conMan.NetInterface = interfaceName
 
 	ok, err := conMan.Disconnect(ssid, time.Second*10)
 	if err != nil {
 		fmt.Println("couldn't disconnect from network")
 		fmt.Println(err)
-		return
+		return err
 	}
 
 	fmt.Printf("disconnect status=%v\n", ok)
+	return nil
 }
 
-func statusExample() {
-	// default "wlan0" only works on a raspi
-	// kubuntu nuc uses "wlp0s20f3"
+func statusExample(interfaceName string) error {
 
-	// kind of a weird way to pass params to the scanManager
 	scanner := wifi.ScanManager
-	scanner.NetInterface = "wlp0s20f3"
+	scanner.NetInterface = interfaceName
 
 	// XXX doesn't really belong on scanner...
-	scanner.CurrentStatus()
+	// XXX clean this up in general
+	// XXX this explodes if you're not connected to a network
+	return scanner.CurrentStatus()
 }
 
-// XXXXX
-
+// SeenNetwork remembers the history of networks we discover
+// in 'wander' mode
 type SeenNetwork struct {
 	// first & last seen times
 	First time.Time
@@ -187,40 +184,70 @@ func wanderLoop(interfaceName string) {
 }
 
 func main() {
-	//wifi.SetDebugMode()
-
-	/*
-		fmt.Printf(">>> getting status at %v\n", time.Now())
-		statusExample()
-
-		time.Sleep(time.Second * 2)
-
-		fmt.Printf(">>> disconnecting at %v\n", time.Now())
-		disconnectExample()
-
-		fmt.Printf(">>> getting status at %v\n", time.Now())
-		statusExample()
-
-		time.Sleep(time.Second * 2)
-
-		fmt.Printf(">>> scan start at %v\n", time.Now())
-		scanExample()
-		fmt.Printf(">>> scan end at %v\n", time.Now())
-
-		time.Sleep(time.Second * 5)
-
-		fmt.Printf(">>> reconnecting at %v\n", time.Now())
-		connectExample()
-
-		fmt.Printf(">>> finished! at %v\n", time.Now())
-	*/
-
+	// default "wlan0" only works on a raspi
+	// kubuntu desktop uses "wlp0s20f3"
 	interfaceName := os.Getenv("SCAN_INTERFACE")
 	if interfaceName == "" {
 		fmt.Println("SCAN_INTERFACE not set, defaulting to wlan0")
 		interfaceName = "wlan0"
 	}
 
-	fmt.Printf(">>> start monitoring network:%s\n", interfaceName)
-	wanderLoop(interfaceName)
+	// subcommand structure cribbed from here
+	// https://gobyexample.com/command-line-subcommands
+	/*
+		wpascan status
+		wpascan connect NETWORK PASSWORD
+		wpascan disconnect
+		wpascan scan
+		wpascan wander
+	*/
+
+	validCommands := []string{"status", "connect", "disconnect", "scan", "wander"}
+
+	connectCmd := flag.NewFlagSet("connect", flag.ExitOnError)
+	connectNet := connectCmd.String("network", "", "network ssid")
+	connectPass := connectCmd.String("pass", "", "network password")
+
+	disconnectCmd := flag.NewFlagSet("connect", flag.ExitOnError)
+	disconnectNet := disconnectCmd.String("network", "", "network ssid")
+
+	if len(os.Args) < 2 {
+		fmt.Printf("Expected subcommand: %s\n", strings.Join(validCommands, ","))
+		os.Exit(1)
+	}
+
+	// XXX how can i add a toplevel flag?
+	// e.g. 'wpascan -d scan'
+	//wifi.SetDebugMode()
+
+	var err error
+
+	switch os.Args[1] {
+	case "status":
+		fmt.Printf(">>> status of interface:%s\n", interfaceName)
+		err = statusExample(interfaceName)
+	case "connect":
+		connectCmd.Parse(os.Args[2:])
+		fmt.Printf(">>> connect to net:'%s' on interface:%s\n", connectNet, interfaceName)
+		err = connectExample(interfaceName, *connectNet, *connectPass)
+	case "disconnect":
+		disconnectCmd.Parse(os.Args[2:])
+		fmt.Printf(">>> disconnecting from net:'%s' on interface:%s\n", connectNet, interfaceName)
+		err = disconnectExample(interfaceName, *disconnectNet)
+	case "scan":
+		fmt.Printf(">>> single scan of network:%s\n", interfaceName)
+		err = scanExample(interfaceName)
+	case "wander":
+		fmt.Printf(">>> start monitoring network:%s\n", interfaceName)
+		wanderLoop(interfaceName)
+	default:
+		fmt.Printf("Expected subcommand: %s\n", strings.Join(validCommands, ","))
+	}
+
+	if err != nil {
+		fmt.Println("ERROR")
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	// should exit with 0?
 }
