@@ -89,8 +89,8 @@ type SeenNetwork struct {
 	AgeHistory    []uint32
 }
 
-func (net *SeenNetwork) Describe() string {
-	return fmt.Sprintf("%s [%s] %d", net.SSID, net.BSSID, net.Frequency)
+func (net *SeenNetwork) String() string {
+	return fmt.Sprintf("%s [%s]", net.SSID, net.BSSID)
 }
 
 func wanderLoop(interfaceName string, log *bufio.Writer) {
@@ -141,10 +141,10 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 					AgeHistory:    []uint32{bss.Age},
 				}
 				networks[bssid] = net
-				fmt.Fprintf(log, "    new network:%s\n", net.Describe())
+				fmt.Fprintf(log, "    new network:%s\n", net)
 				newCount++
 			} else { // known network, just update signal
-				fmt.Fprintf(log, "    updating network:%s\n", net.Describe())
+				fmt.Fprintf(log, "    updating network:%s\n", net)
 				net.SignalHistory = append(net.SignalHistory, bss.Signal)
 				net.AgeHistory = append(net.AgeHistory, bss.Age)
 				updateCount++
@@ -158,7 +158,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 			if !ok {
 				// set the final seen time and remove the network
 				// from the map
-				fmt.Fprintf(log, "    removing network:%s\n", net.Describe())
+				fmt.Fprintf(log, "    removing network:%s\n", net)
 				net.Last = now
 
 				// XXX log this into our master network history
