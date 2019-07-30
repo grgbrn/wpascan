@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,6 +96,33 @@ func (net *SeenNetwork) String() string {
 	return fmt.Sprintf("%+q [%s] %s", net.SSID, net.BSSID, net.KeyMgmt)
 }
 
+// LastSignalStrength returns the last known signal strength for a network
+func (net *SeenNetwork) LastSignalStrength() int16 {
+	return net.SignalHistory[len(net.SignalHistory)-1]
+}
+
+// candidates examines the list of current networks to identify
+// which (if any) are interesting
+// returns a list sorted by most recent signal strength
+func candidates(networks map[string]*SeenNetwork) []*SeenNetwork {
+
+	results := make([]*SeenNetwork, 0)
+
+	for _, v := range networks {
+		if len(v.KeyMgmt) == 0 { //unprotected
+			results = append(results, v)
+		}
+	}
+
+	// sort results by last value of SignalHistory
+	sort.Slice(results, func(i, j int) bool {
+		// use > because these are all negative numbers and we want smallest first
+		return results[i].LastSignalStrength() > results[j].LastSignalStrength()
+	})
+
+	return results
+}
+
 func wanderLoop(interfaceName string, log *bufio.Writer) {
 	scanner := wifi.ScanManager
 	scanner.NetInterface = interfaceName
@@ -182,6 +210,14 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// 	fmt.Println("can't marshal network data:", err)
 		// }
 		// fmt.Print(string(b))
+
+		candidates := candidates(networks)
+		if len(candidates) > 0 {
+			fmt.Printf(">>> found %d interesting networks\n", len(candidates))
+			for _, net := range candidates {
+				fmt.Printf("%s signal: %d\n", net, net.LastSignalStrength())
+			}
+		}
 
 		fmt.Printf(">>> completed scan - %v\n", time.Now())
 
