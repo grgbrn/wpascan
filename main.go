@@ -81,7 +81,8 @@ type SeenNetwork struct {
 	// constant bss fields
 	BSSID     string
 	SSID      string
-	WPS       string
+	WPS       string // XXX always unset?
+	KeyMgmt   []string
 	Frequency uint16
 
 	// updated on each successful scan
@@ -90,7 +91,8 @@ type SeenNetwork struct {
 }
 
 func (net *SeenNetwork) String() string {
-	return fmt.Sprintf("%s [%s]", net.SSID, net.BSSID)
+	// SSIDs often contain NULs so be careful when printing them
+	return fmt.Sprintf("%+q [%s] %s", net.SSID, net.BSSID, net.KeyMgmt)
 }
 
 func wanderLoop(interfaceName string, log *bufio.Writer) {
@@ -136,6 +138,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 					BSSID:         bssid,
 					SSID:          bss.SSID,
 					WPS:           bss.WPS,
+					KeyMgmt:       bss.KeyMgmt,
 					Frequency:     bss.Frequency,
 					SignalHistory: []int16{bss.Signal},
 					AgeHistory:    []uint32{bss.Age},
@@ -252,9 +255,9 @@ func main() {
 	case "wander":
 		fmt.Printf(">>> start monitoring network:%s\n", interfaceName)
 
-		// create a per-session log for this
-		// just log to pwd for now XXX
-		logName := time.Now().Format("2006-01-02_15:04:05.log")
+		// create a per-session log (just in $PWD for now)
+		// XXX may be better to close & reopen this file each time?
+		logName := time.Now().Format("2006-01-02_150405.log")
 		fmt.Printf(">>> logging session to %s\n", logName)
 		f, err := os.Create(logName)
 		if err == nil {
