@@ -13,19 +13,33 @@ import (
 	wifi "github.com/mark2b/wpa-connect"
 )
 
-func scanExample(interfaceName string) error {
+func scanExample(interfaceName string, useFilter bool) error {
 
-	// kind of a weird way to pass params to the scanManager
-	scanner := wifi.ScanManager
-	scanner.NetInterface = interfaceName
+	networks := make(map[string]*SeenNetwork)
 
-	bssList, err := scanner.Scan()
+	seenNetworks, err := basicScan(interfaceName)
 	if err != nil {
 		return err
 	}
-	for _, bss := range bssList {
-		//fmt.Println(bss.SSID, bss.Signal, bss.KeyMgmt)
-		fmt.Printf("%+v\n", bss)
+
+	// put these in an unnecessary map just for use with candidates/filter
+	for _, n := range seenNetworks {
+		networks[n.BSSID] = n
+	}
+
+	var filter networkFilterPredicate
+	if useFilter {
+		filter = compoundFilter(unprotectedNetworks, uninterestingPublicNets)
+	} else {
+		filter = allNetworks
+	}
+
+	if candidates := candidates(networks, filter); len(candidates) > 0 {
+		for _, net := range candidates {
+			fmt.Printf("%s signal: %d\n", net, net.LastSignalStrength())
+		}
+	} else {
+		fmt.Printf("nothing interesting found, %d networks filtered\n", len(networks))
 	}
 	return nil
 }
@@ -100,15 +114,81 @@ func (net *SeenNetwork) LastSignalStrength() int16 {
 	return net.SignalHistory[len(net.SignalHistory)-1]
 }
 
+// LastAge returns the age (in seconds?) of the signal strength
+func (net *SeenNetwork) LastAge() uint32 {
+	return net.AgeHistory[len(net.AgeHistory)-1]
+}
+
+func basicScan(interfaceName string) ([]*SeenNetwork, error) {
+
+	results := make([]*SeenNetwork, 0)
+
+	scanner := wifi.ScanManager
+	scanner.NetInterface = interfaceName
+
+	bssList, err := scanner.Scan()
+	if err != nil {
+		return results, err
+	}
+
+	for _, bss := range bssList {
+		net := &SeenNetwork{
+			BSSID:         bss.BSSID,
+			SSID:          bss.SSID,
+			WPS:           bss.WPS,
+			KeyMgmt:       bss.KeyMgmt,
+			Frequency:     bss.Frequency,
+			SignalHistory: []int16{bss.Signal},
+			AgeHistory:    []uint32{bss.Age},
+		}
+		results = append(results, net)
+	}
+
+	return results, nil
+}
+
+// simple predicates to filter interesting networks
+
+type networkFilterPredicate func(*SeenNetwork) bool
+
+func unprotectedNetworks(n *SeenNetwork) bool {
+	return len(n.KeyMgmt) == 0
+}
+
+func uninterestingPublicNets(n *SeenNetwork) bool {
+	if n.SSID == "Vodafone Homespot" ||
+		n.SSID == "Vodafone Hotspot" ||
+		n.SSID == "Telekom_FON" {
+		return false
+	}
+	return true
+}
+
+func allNetworks(n *SeenNetwork) bool {
+	return true
+}
+
+// a compound predicate passes (returns true) only if all sub-predicates return true
+func compoundFilter(predicates ...networkFilterPredicate) networkFilterPredicate {
+	return func(net *SeenNetwork) bool {
+		for _, pred := range predicates {
+			if !pred(net) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
 // candidates examines the list of current networks to identify
 // which (if any) are interesting
 // returns a list sorted by most recent signal strength
-func candidates(networks map[string]*SeenNetwork) []*SeenNetwork {
+func candidates(networks map[string]*SeenNetwork, filter networkFilterPredicate) []*SeenNetwork {
 
 	results := make([]*SeenNetwork, 0)
 
 	for _, v := range networks {
-		if len(v.KeyMgmt) == 0 { //unprotected
+		if filter(v) {
 			results = append(results, v)
 		}
 	}
@@ -123,8 +203,6 @@ func candidates(networks map[string]*SeenNetwork) []*SeenNetwork {
 }
 
 func wanderLoop(interfaceName string, log *bufio.Writer) {
-	scanner := wifi.ScanManager
-	scanner.NetInterface = interfaceName
 
 	networks := make(map[string]*SeenNetwork)
 
@@ -135,7 +213,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		fmt.Printf(">>> starting scan - %v\n", now)
 		fmt.Fprintf(log, ">>> starting scan - %v\n", now)
 
-		bssList, err := scanner.Scan()
+		bssList, err := basicScan(interfaceName)
 		if err != nil {
 			fmt.Fprintf(log, "Error scanning network:%v\n", err)
 			continue
@@ -154,29 +232,22 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// for completeness...
 		var newCount, updateCount, delCount int
 
-		for _, bss := range bssList {
-			bssid := bss.BSSID
+		for _, network := range bssList {
+			bssid := network.BSSID
 			currentSeen[bssid] = true
 
 			net, ok := networks[bssid]
 			if !ok { // new network found
-				net = &SeenNetwork{
-					First:         now,
-					BSSID:         bssid,
-					SSID:          bss.SSID,
-					WPS:           bss.WPS,
-					KeyMgmt:       bss.KeyMgmt,
-					Frequency:     bss.Frequency,
-					SignalHistory: []int16{bss.Signal},
-					AgeHistory:    []uint32{bss.Age},
-				}
+				net.First = now
 				networks[bssid] = net
 				fmt.Fprintf(log, "    new network:%s\n", net)
 				newCount++
 			} else { // known network, just update signal
 				fmt.Fprintf(log, "    updating network:%s\n", net)
-				net.SignalHistory = append(net.SignalHistory, bss.Signal)
-				net.AgeHistory = append(net.AgeHistory, bss.Age)
+				// a little obtuse - new entry 'network' will only have one value
+				// in it's signal & age arrays; copy those onto the instance in the map
+				net.SignalHistory = append(net.SignalHistory, network.LastSignalStrength())
+				net.AgeHistory = append(net.AgeHistory, network.LastAge())
 				updateCount++
 			}
 		}
@@ -210,7 +281,9 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// }
 		// fmt.Print(string(b))
 
-		candidates := candidates(networks)
+		_filter := compoundFilter(unprotectedNetworks, uninterestingPublicNets)
+
+		candidates := candidates(networks, _filter)
 		if len(candidates) > 0 {
 			fmt.Printf(">>> found %d interesting networks\n", len(candidates))
 			for _, net := range candidates {
@@ -262,6 +335,9 @@ func main() {
 	disconnectCmd := flag.NewFlagSet("connect", flag.ExitOnError)
 	disconnectNet := disconnectCmd.String("network", "", "network ssid")
 
+	checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
+	checkFilter := checkCmd.Bool("filter", false, "uninteresting network filter")
+
 	if len(os.Args) < 2 {
 		fmt.Printf("Expected subcommand: %s\n", strings.Join(validCommands, ","))
 		os.Exit(1)
@@ -286,8 +362,9 @@ func main() {
 		fmt.Printf(">>> disconnecting from net:'%s' on interface:%s\n", *connectNet, interfaceName)
 		err = disconnectExample(interfaceName, *disconnectNet)
 	case "scan":
+		checkCmd.Parse(os.Args[2:])
 		fmt.Printf(">>> single scan of network:%s\n", interfaceName)
-		err = scanExample(interfaceName)
+		err = scanExample(interfaceName, *checkFilter)
 	case "wander":
 		fmt.Printf(">>> start monitoring network:%s\n", interfaceName)
 
