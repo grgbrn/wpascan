@@ -29,7 +29,7 @@ func scanExample(interfaceName string, useFilter bool) error {
 
 	var filter networkFilterPredicate
 	if useFilter {
-		filter = compoundFilter(unprotectedNetworks, uninterestingPublicNets)
+		filter = defaultNetworkFilters
 	} else {
 		filter = allNetworks
 	}
@@ -180,6 +180,9 @@ func compoundFilter(predicates ...networkFilterPredicate) networkFilterPredicate
 	}
 }
 
+// XXX make these configurable through an environment var?
+var defaultNetworkFilters = compoundFilter(unprotectedNetworks, uninterestingPublicNets)
+
 // candidates examines the list of current networks to identify
 // which (if any) are interesting
 // returns a list sorted by most recent signal strength
@@ -238,9 +241,9 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 
 			net, ok := networks[bssid]
 			if !ok { // new network found
-				net.First = now
-				networks[bssid] = net
-				fmt.Fprintf(log, "    new network:%s\n", net)
+				network.First = now
+				networks[bssid] = network
+				fmt.Fprintf(log, "    new network:%s\n", network)
 				newCount++
 			} else { // known network, just update signal
 				fmt.Fprintf(log, "    updating network:%s\n", net)
@@ -281,14 +284,14 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// }
 		// fmt.Print(string(b))
 
-		_filter := compoundFilter(unprotectedNetworks, uninterestingPublicNets)
-
-		candidates := candidates(networks, _filter)
+		candidates := candidates(networks, defaultNetworkFilters)
 		if len(candidates) > 0 {
 			fmt.Printf(">>> found %d interesting networks\n", len(candidates))
 			for _, net := range candidates {
 				fmt.Printf("%s signal: %d\n", net, net.LastSignalStrength())
 			}
+		} else {
+			fmt.Printf("nothing interesting found, %d networks filtered\n", len(networks))
 		}
 
 		fmt.Printf(">>> completed scan - %v\n", time.Now())
