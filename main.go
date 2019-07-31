@@ -30,7 +30,6 @@ func scanExample(interfaceName string) error {
 	return nil
 }
 
-// XXX haven't really tested this yet
 func connectExample(interfaceName, ssid, pass string) error {
 
 	conMan := wifi.ConnectManager
@@ -251,9 +250,10 @@ func main() {
 		wpascan disconnect
 		wpascan scan
 		wpascan wander
+		wpascan check
 	*/
 
-	validCommands := []string{"status", "connect", "disconnect", "scan", "wander"}
+	validCommands := []string{"status", "connect", "disconnect", "scan", "wander", "check"}
 
 	connectCmd := flag.NewFlagSet("connect", flag.ExitOnError)
 	connectNet := connectCmd.String("network", "", "network ssid")
@@ -300,6 +300,10 @@ func main() {
 			defer f.Close()
 			wanderLoop(interfaceName, bufio.NewWriter(f))
 		}
+	case "check":
+		fmt.Printf(">>> connectivity check for network:%s\n", interfaceName)
+		connected := CheckConnectivity(interfaceName)
+		fmt.Printf("connected=%v\n", connected)
 	default:
 		fmt.Printf("Expected subcommand: %s\n", strings.Join(validCommands, ","))
 	}
