@@ -217,7 +217,6 @@ func compoundFilter(predicates ...networkFilterPredicate) networkFilterPredicate
 }
 
 // XXX make these configurable through an environment var?
-//var defaultNetworkFilters = compoundFilter(unprotectedNetworks, uninterestingPublicNets)
 var defaultNetworkFilters = compoundFilter(unprotectedNetworks)
 
 // candidates examines the list of current networks to identify
@@ -280,10 +279,10 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 			if !ok { // new network found
 				network.First = now
 				networks[bssid] = network
-				fmt.Fprintf(log, "    new network:%s\n", network)
+				//fmt.Fprintf(log, "    new network:%s\n", network)
 				newCount++
 			} else { // known network, just update signal
-				fmt.Fprintf(log, "    updating network:%s\n", net)
+				//fmt.Fprintf(log, "    updating network:%s\n", net)
 				// a little obtuse - new entry 'network' will only have one value
 				// in it's signal & age arrays; copy those onto the instance in the map
 				net.SignalHistory = append(net.SignalHistory, network.LastSignalStrength())
@@ -299,7 +298,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 			if !ok {
 				// set the final seen time and remove the network
 				// from the map
-				fmt.Fprintf(log, "    removing network:%s\n", net)
+				//fmt.Fprintf(log, "    removing network:%s\n", net)
 				net.Last = now
 
 				// XXX log this into our master network history
@@ -307,6 +306,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 				if err != nil {
 					fmt.Fprintln(log, "can't marshal data:", err)
 				}
+				fmt.Fprintln(log, "> recording seen network")
 				fmt.Fprintln(log, string(b))
 
 				delete(networks, _bss)
@@ -323,19 +323,19 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 
 		candidates := candidates(networks, defaultNetworkFilters)
 		if len(candidates) > 0 {
-			fmt.Printf(">>> found %d interesting networks\n", len(candidates))
+			fmt.Fprintf(log, ">   found %d interesting networks\n", len(candidates))
 			for _, net := range candidates {
-				fmt.Printf("%s signal: %d\n", net, net.LastSignalStrength())
+				fmt.Fprintf(log, "* %s signal: %d\n", net, net.LastSignalStrength())
 			}
 		} else {
-			fmt.Printf("nothing interesting found, %d networks filtered\n", len(networks))
+			fmt.Fprintf(log, "nothing interesting found, %d networks filtered\n", len(networks))
 		}
 
 		// attempt to probe all interesting networks
 		// XXX remember those that we've probed so we can ignore them in the future
 		if len(candidates) > 0 {
 			for ix, candidate := range candidates {
-				fmt.Printf("probing network:%s [n=%d]\n", candidate, ix)
+				fmt.Printf(">   probing network:%s [n=%d]\n", candidate, ix)
 				ProbeNetwork(interfaceName, candidates[0])
 				time.Sleep(time.Second * 1) // why not?
 			}
@@ -346,7 +346,8 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		fmt.Fprintf(log, ">>> currently %d networks in range\n", len(networks))
 		fmt.Fprintf(log, ">>> %d updated / %d new / %d removed\n", updateCount, newCount, delCount)
 		fmt.Fprintf(log, ">>> completed scan - %v\n", time.Now())
-
+		// also go to stdout
+		fmt.Printf(">>> completed scan - %v\n", time.Now())
 		err = log.Flush()
 		if err != nil {
 			fmt.Println("Error flushing log")
