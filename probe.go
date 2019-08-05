@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os/exec"
 	"time"
@@ -8,32 +9,32 @@ import (
 	wifi "github.com/mark2b/wpa-connect"
 )
 
-func disconnect(status *wifi.ConnectionStatus) error {
+func disconnect(log *bufio.Writer, status *wifi.ConnectionStatus) error {
 	if status == nil {
-		fmt.Printf("not connected, ignoring disconnect() call")
+		fmt.Fprintf(log, "not connected, ignoring disconnect() call")
 	}
 	conMan := wifi.ConnectManager // XXX
 
-	fmt.Printf("disconnecting from %s\n", status.SSID)
+	fmt.Fprintf(log, "disconnecting from %s\n", status.SSID)
 	t := time.Now()
 	_, err := conMan.Disconnect(status.SSID, time.Second*10)
-	fmt.Printf("disconnected in %s\n", time.Since(t))
+	fmt.Fprintf(log, "disconnected in %s\n", time.Since(t))
 	return err
 }
 
-func ProbeNetwork(interfaceName string, net *SeenNetwork) error {
+func ProbeNetwork(log *bufio.Writer, interfaceName string, net *SeenNetwork) error {
 
 	conMan := wifi.ConnectManager
 	conMan.NetInterface = interfaceName
 
 	connected, status, err := conMan.GetCurrentStatus()
 	if err != nil {
-		fmt.Println("couldn't get network status")
+		fmt.Fprintf(log, "couldn't get network status")
 		return err
 	}
 	if connected {
-		fmt.Printf("currently connected to:%s, must disconnect first\n", status.SSID)
-		disconnect(status)
+		fmt.Fprintf(log, "currently connected to:%s, must disconnect first\n", status.SSID)
+		disconnect(log, status)
 	}
 
 	// XXX this may connect to the wrong network if we have multiple
@@ -49,12 +50,12 @@ func ProbeNetwork(interfaceName string, net *SeenNetwork) error {
 
 	conn, err := conMan.Connect(net.SSID, pass, time.Second*60)
 	if err != nil {
-		fmt.Printf("couldn't connect: %s\n", err)
+		fmt.Fprintf(log, "couldn't connect: %s\n", err)
 		return err
 	}
 
-	fmt.Println("Connected", conn.NetInterface, conn.SSID, conn.IP4.String(), conn.IP6.String())
-	fmt.Printf("Connected in %v\n", time.Since(start))
+	fmt.Fprintln(log, "Connected", conn.NetInterface, conn.SSID, conn.IP4.String(), conn.IP6.String())
+	fmt.Fprintf(log, "Connected in %v\n", time.Since(start))
 
 	// confirm that we're really connected
 	connected, status, err = conMan.GetCurrentStatus()
@@ -67,10 +68,10 @@ func ProbeNetwork(interfaceName string, net *SeenNetwork) error {
 
 	// connectivity check / captive portal
 	//
-	fmt.Println("Checking for network connectivity....")
+	fmt.Fprintf(log, "Checking for network connectivity....")
 	ret := CheckConnectivity(interfaceName)
 
-	fmt.Printf("connectivity=%v\n", ret)
+	fmt.Fprintf(log, "connectivity=%v\n", ret)
 
 	//
 	// avahi scan
@@ -78,10 +79,10 @@ func ProbeNetwork(interfaceName string, net *SeenNetwork) error {
 	avahiCmd := exec.Command("avahi-browse", "-a", "-t")
 	avahiOut, err := avahiCmd.Output()
 	if err != nil {
-		fmt.Printf("error executing avahi-browse: %s\n", err)
+		fmt.Fprintf(log, "error executing avahi-browse: %s\n", err)
 	} else {
-		fmt.Printf("*** avahi-browse [%d bytes] ****\n", len(avahiOut))
-		fmt.Println(string(avahiOut))
+		fmt.Fprintf(log, "*** avahi-browse [%d bytes] ****\n", len(avahiOut))
+		fmt.Fprintf(log, string(avahiOut))
 	}
 
 	//
@@ -90,17 +91,17 @@ func ProbeNetwork(interfaceName string, net *SeenNetwork) error {
 	ipCmd := exec.Command("ip", "neighbor", "show")
 	ipOut, err := ipCmd.Output()
 	if err != nil {
-		fmt.Printf("error executing ip: %s\n", err)
+		fmt.Fprintf(log, "error executing ip: %s\n", err)
 	} else {
-		fmt.Printf("*** ip neighbors [%d bytes] ****\n", len(ipOut))
-		fmt.Println(string(ipOut))
+		fmt.Fprintf(log, "*** ip neighbors [%d bytes] ****\n", len(ipOut))
+		fmt.Fprintf(log, string(ipOut))
 	}
 
 	//
 	// finished probe, so disconnect
 	//
-	fmt.Printf("probed network:%s in %s; disconnecting\n", net.SSID, time.Since(start))
-	disconnect(status)
+	fmt.Fprintf(log, "probed network:%s in %s; disconnecting\n", net.SSID, time.Since(start))
+	disconnect(log, status)
 
 	return nil
 }

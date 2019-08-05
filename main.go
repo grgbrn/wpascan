@@ -112,7 +112,7 @@ func probeExample(interfaceName, ssid string) error {
 		}
 	}
 
-	return ProbeNetwork(interfaceName, targetNet)
+	return ProbeNetwork(bufio.NewWriter(os.Stdout), interfaceName, targetNet)
 }
 
 // SeenNetwork remembers the history of networks we discover
@@ -334,14 +334,19 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// attempt to probe all interesting networks
 		// XXX remember those that we've probed so we can ignore them in the future
 		if len(candidates) > 0 {
+			var probeOK, probeErr int
 			for ix, candidate := range candidates {
-				fmt.Printf(">   probing network:%s [n=%d]\n", candidate, ix)
-				ProbeNetwork(interfaceName, candidates[0])
+				fmt.Fprintf(log, ">   probing network:%s [n=%d]\n", candidate, ix)
+				e := ProbeNetwork(log, interfaceName, candidates[0])
+				if e != nil {
+					probeErr++
+				} else {
+					probeOK++
+				}
 				time.Sleep(time.Second * 1) // why not?
 			}
+			fmt.Fprintf(log, ">>> %d probes successful, %d errors\n", probeOK, probeErr)
 		}
-
-		fmt.Printf(">>> completed scan - %v\n", time.Now())
 
 		fmt.Fprintf(log, ">>> currently %d networks in range\n", len(networks))
 		fmt.Fprintf(log, ">>> %d updated / %d new / %d removed\n", updateCount, newCount, delCount)
