@@ -76,13 +76,43 @@ func disconnectExample(interfaceName, ssid string) error {
 
 func statusExample(interfaceName string) error {
 
-	scanner := wifi.ScanManager
-	scanner.NetInterface = interfaceName
+	conMan := wifi.ConnectManager
+	conMan.NetInterface = interfaceName
 
-	// XXX doesn't really belong on scanner...
-	// XXX clean this up in general
-	// XXX this explodes if you're not connected to a network
-	return scanner.CurrentStatus()
+	connected, status, err := conMan.GetCurrentStatus()
+	if err != nil {
+		fmt.Println("error getting network status")
+		fmt.Println(err)
+		return err
+	}
+	fmt.Printf("connected=%t\n", connected)
+	if connected {
+		fmt.Printf("%+v\n", status)
+	}
+
+	return nil
+}
+
+func probeExample(interfaceName, ssid string) error {
+
+	conMan := wifi.ConnectManager
+	conMan.NetInterface = interfaceName
+
+	// need our seenNetwork object to connect
+	seenNetworks, err := basicScan(interfaceName)
+	if err != nil {
+		return err
+	}
+
+	var targetNet *SeenNetwork
+	for _, net := range seenNetworks {
+		if net.SSID == ssid {
+			targetNet = net
+			break
+		}
+	}
+
+	return ProbeNetwork(interfaceName, targetNet)
 }
 
 // SeenNetwork remembers the history of networks we discover
@@ -109,6 +139,11 @@ func (net *SeenNetwork) String() string {
 	return fmt.Sprintf("%+q [%s] %s", net.SSID, net.BSSID, net.KeyMgmt)
 }
 
+// IsUnprotected indictes whether a network has a password
+func (net *SeenNetwork) IsUnprotected() bool {
+	return len(net.KeyMgmt) == 0
+}
+
 // LastSignalStrength returns the last known signal strength for a network
 func (net *SeenNetwork) LastSignalStrength() int16 {
 	return net.SignalHistory[len(net.SignalHistory)-1]
@@ -119,6 +154,7 @@ func (net *SeenNetwork) LastAge() uint32 {
 	return net.AgeHistory[len(net.AgeHistory)-1]
 }
 
+// xxx these results are unsorted, but maybe it should be?
 func basicScan(interfaceName string) ([]*SeenNetwork, error) {
 
 	results := make([]*SeenNetwork, 0)
@@ -152,7 +188,7 @@ func basicScan(interfaceName string) ([]*SeenNetwork, error) {
 type networkFilterPredicate func(*SeenNetwork) bool
 
 func unprotectedNetworks(n *SeenNetwork) bool {
-	return len(n.KeyMgmt) == 0
+	return n.IsUnprotected()
 }
 
 func uninterestingPublicNets(n *SeenNetwork) bool {
@@ -181,7 +217,8 @@ func compoundFilter(predicates ...networkFilterPredicate) networkFilterPredicate
 }
 
 // XXX make these configurable through an environment var?
-var defaultNetworkFilters = compoundFilter(unprotectedNetworks, uninterestingPublicNets)
+//var defaultNetworkFilters = compoundFilter(unprotectedNetworks, uninterestingPublicNets)
+var defaultNetworkFilters = compoundFilter(unprotectedNetworks)
 
 // candidates examines the list of current networks to identify
 // which (if any) are interesting
@@ -294,6 +331,16 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 			fmt.Printf("nothing interesting found, %d networks filtered\n", len(networks))
 		}
 
+		// attempt to probe all interesting networks
+		// XXX remember those that we've probed so we can ignore them in the future
+		if len(candidates) > 0 {
+			for ix, candidate := range candidates {
+				fmt.Printf("probing network:%s [n=%d]\n", candidate, ix)
+				ProbeNetwork(interfaceName, candidates[0])
+				time.Sleep(time.Second * 1) // why not?
+			}
+		}
+
 		fmt.Printf(">>> completed scan - %v\n", time.Now())
 
 		fmt.Fprintf(log, ">>> currently %d networks in range\n", len(networks))
@@ -327,9 +374,12 @@ func main() {
 		wpascan scan
 		wpascan wander
 		wpascan check
+		wpascan probe NETWORK
 	*/
 
-	validCommands := []string{"status", "connect", "disconnect", "scan", "wander", "check"}
+	validCommands := []string{
+		"status", "connect", "disconnect", "scan", "wander", "check", "probe",
+	}
 
 	connectCmd := flag.NewFlagSet("connect", flag.ExitOnError)
 	connectNet := connectCmd.String("network", "", "network ssid")
@@ -338,8 +388,11 @@ func main() {
 	disconnectCmd := flag.NewFlagSet("connect", flag.ExitOnError)
 	disconnectNet := disconnectCmd.String("network", "", "network ssid")
 
-	checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
-	checkFilter := checkCmd.Bool("filter", false, "uninteresting network filter")
+	scanCmd := flag.NewFlagSet("scan", flag.ExitOnError)
+	scanFilter := scanCmd.Bool("filter", false, "uninteresting network filter")
+
+	probeCmd := flag.NewFlagSet("probe", flag.ExitOnError)
+	probeNet := probeCmd.String("network", "", "network ssid")
 
 	if len(os.Args) < 2 {
 		fmt.Printf("Expected subcommand: %s\n", strings.Join(validCommands, ","))
@@ -365,9 +418,9 @@ func main() {
 		fmt.Printf(">>> disconnecting from net:'%s' on interface:%s\n", *connectNet, interfaceName)
 		err = disconnectExample(interfaceName, *disconnectNet)
 	case "scan":
-		checkCmd.Parse(os.Args[2:])
+		scanCmd.Parse(os.Args[2:])
 		fmt.Printf(">>> single scan of network:%s\n", interfaceName)
-		err = scanExample(interfaceName, *checkFilter)
+		err = scanExample(interfaceName, *scanFilter)
 	case "wander":
 		fmt.Printf(">>> start monitoring network:%s\n", interfaceName)
 
@@ -384,6 +437,10 @@ func main() {
 		fmt.Printf(">>> connectivity check for network:%s\n", interfaceName)
 		connected := CheckConnectivity(interfaceName)
 		fmt.Printf("connected=%v\n", connected)
+	case "probe":
+		probeCmd.Parse(os.Args[2:])
+		fmt.Printf(">>> probing network:%s\n", *probeNet)
+		probeExample(interfaceName, *probeNet)
 	default:
 		fmt.Printf("Expected subcommand: %s\n", strings.Join(validCommands, ","))
 	}
