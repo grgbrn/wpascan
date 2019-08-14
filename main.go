@@ -346,7 +346,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// }
 		// fmt.Print(string(b))
 
-		fmt.Fprintf(log, ">   ignoring %d previosly probed networks\n", len(probed.Remembered))
+		fmt.Fprintf(log, ">   ignoring %d previously probed networks\n", len(probed.Remembered))
 		fmt.Fprintf(log, "    %v\n", probed.Remembered)
 
 		candidates := candidates(networks, networkFilter)
@@ -360,12 +360,12 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		}
 
 		// attempt to probe all interesting networks
-		// XXX remember those that we've probed so we can ignore them in the future
 		if len(candidates) > 0 {
 			var probeOK, probeErr int
 			probe := NetworkProbe{
-				InterfaceName: interfaceName,
-				IO:            log,
+				InterfaceName:   interfaceName,
+				IO:              log,
+				TimeoutDuration: time.Second * 10,
 			}
 			for ix, candidate := range candidates {
 				fmt.Fprintf(log, ">   probing network:%s [n=%d]\n", candidate, ix)
@@ -375,6 +375,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 				} else {
 					probeOK++
 				}
+				// add to filter so we don't probe it again
 				probed.Add(candidate)
 				time.Sleep(time.Second * 1) // why not?
 			}
