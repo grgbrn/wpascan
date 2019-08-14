@@ -221,6 +221,23 @@ func compoundFilter(predicates ...networkFilterPredicate) networkFilterPredicate
 	}
 }
 
+// convenience struct to filter previously probed networks
+type rememberedNets struct {
+	Remembered []*SeenNetwork
+}
+
+func (rn *rememberedNets) Add(net *SeenNetwork) {
+	rn.Remembered = append(rn.Remembered, net)
+}
+func (rn *rememberedNets) Filter(net *SeenNetwork) bool {
+	for _, oldNet := range rn.Remembered {
+		if net.BSSID == oldNet.BSSID && net.SSID == oldNet.SSID {
+			return false
+		}
+	}
+	return true
+}
+
 // XXX make these configurable through an environment var?
 var defaultNetworkFilters = compoundFilter(unprotectedNetworks)
 
@@ -249,6 +266,9 @@ func candidates(networks map[string]*SeenNetwork, filter networkFilterPredicate)
 func wanderLoop(interfaceName string, log *bufio.Writer) {
 
 	networks := make(map[string]*SeenNetwork)
+	probed := rememberedNets{}
+
+	networkFilter := compoundFilter(unprotectedNetworks, probed.Filter)
 
 	for { // ever
 		time.Sleep(time.Second * 10)
@@ -326,7 +346,10 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 		// }
 		// fmt.Print(string(b))
 
-		candidates := candidates(networks, defaultNetworkFilters)
+		fmt.Fprintf(log, ">   ignoring %d previosly probed networks\n", len(probed.Remembered))
+		fmt.Fprintf(log, "    %v\n", probed.Remembered)
+
+		candidates := candidates(networks, networkFilter)
 		if len(candidates) > 0 {
 			fmt.Fprintf(log, ">   found %d interesting networks\n", len(candidates))
 			for _, net := range candidates {
@@ -352,6 +375,7 @@ func wanderLoop(interfaceName string, log *bufio.Writer) {
 				} else {
 					probeOK++
 				}
+				probed.Add(candidate)
 				time.Sleep(time.Second * 1) // why not?
 			}
 			fmt.Fprintf(log, ">>> %d probes successful, %d errors\n", probeOK, probeErr)
