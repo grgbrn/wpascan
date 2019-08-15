@@ -431,6 +431,9 @@ func main() {
 	scanCmd := flag.NewFlagSet("scan", flag.ExitOnError)
 	scanFilter := scanCmd.Bool("filter", false, "uninteresting network filter")
 
+	wanderCmd := flag.NewFlagSet("wander", flag.ExitOnError)
+	wanderNoLog := wanderCmd.Bool("nolog", false, "only log to stdout, not a file")
+
 	probeCmd := flag.NewFlagSet("probe", flag.ExitOnError)
 	probeNet := probeCmd.String("network", "", "network ssid")
 
@@ -462,17 +465,26 @@ func main() {
 		fmt.Printf(">>> single scan of network:%s\n", interfaceName)
 		err = scanExample(interfaceName, *scanFilter)
 	case "wander":
-		fmt.Printf(">>> start monitoring network:%s\n", interfaceName)
-
-		// create a per-session log (just in $PWD for now)
-		// XXX may be better to close & reopen this file each time?
-		logName := time.Now().Format("2006-01-02_150405.log")
-		fmt.Printf(">>> logging session to %s\n", logName)
-		f, err := os.Create(logName)
-		if err == nil {
-			defer f.Close()
-			wanderLoop(interfaceName, bufio.NewWriter(f))
+		fmt.Printf(">>> wandering with network:%s\n", interfaceName)
+		wanderCmd.Parse(os.Args[2:])
+		var logger *bufio.Writer
+		if *wanderNoLog {
+			logger = bufio.NewWriter(os.Stdout)
+		} else {
+			// create a per-session log (just in $PWD for now)
+			logName := time.Now().Format("2006-01-02_150405.log")
+			fmt.Printf(">>> logging session to %s\n", logName)
+			f, err := os.Create(logName)
+			if err == nil {
+				defer f.Close()
+				logger = bufio.NewWriter(f)
+			} else {
+				fmt.Println("ERROR")
+				fmt.Println(err)
+				os.Exit(1)
+			}
 		}
+		wanderLoop(interfaceName, logger)
 	case "check":
 		fmt.Printf(">>> connectivity check for network:%s\n", interfaceName)
 		connected := CheckConnectivity(interfaceName)
